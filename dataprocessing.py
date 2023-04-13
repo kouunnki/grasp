@@ -9,7 +9,7 @@ import torch.utils.data
 import os
 import glob
 import image
-path = '/home/hyunqi/anaconda3/ggcnn-master/dataset/01/pcd0116cpos.txt'
+
 class GraspDatasetBase(torch.utils.data.Dataset):
     """
     An abstract dataset for training GG-CNNs in a common format.
@@ -290,8 +290,5 @@ class GraspDatasetBase(torch.utils.data.Dataset):
         angles_one_hot = np.eye(19)[angles_class.astype(int) ]
         angles_one_hot[angles_class == 0] = 0
         return off_xy,w_xy,angles_one_hot
-    x = target(points,angles_original)
-    np.set_printoptions(threshold=np.inf)
-#print(np.sum(x))
-#plt.imshow(x, cmap='hot',interpolation='nearest')
-#plt.savefig('./myplot.png')
+    
+    def __getitem__(self, idx):

@@ -11,9 +11,7 @@ import glob
 import image
 
 class GraspDatasetBase(torch.utils.data.Dataset):
-    """
-    An abstract dataset for training GG-CNNs in a common format.
-    """
+
     def __init__(self, output_size=320, include_depth=True, include_rgb=False, random_rotate=False,
                  random_zoom=False, input_only=False, file_path, start=0.0, end=1.0, ds_rotate=0,):
 

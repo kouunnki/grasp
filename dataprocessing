@@ -213,10 +213,7 @@ class GraspDatasetBase(torch.utils.data.Dataset):
 
     def target(self,gt_boxes,angles):
         gt_boxes = np.array(gt_boxes, np.int32)
-        raw_height, raw_width = 320,320
-        gt_boxes_area = (np.abs(
-            (gt_boxes[:, 2] - gt_boxes[:, 0]) * (gt_boxes[:, 3] - gt_boxes[:, 1])))  #the area of the boxes
-        boxes_cnt = len(gt_boxes)                                                    #the number of the boxes
+        raw_height, raw_width = 320,320                                                   #the number of the boxes
 
         shift_x = np.arange(0, raw_width).reshape(-1, 1)
         shift_y = np.arange(0, raw_height).reshape(-1, 1)
@@ -243,24 +240,19 @@ class GraspDatasetBase(torch.utils.data.Dataset):
 
         off_xy = offset[xy[:, 0] * stride, xy[:, 1] * stride]  #print:(1600, 6, 4)
         raw_xy = xy*stride+stride/2        #(1600,2) the coordinate of 1600 points in the input picture
-        raw_xy_1 = raw_xy.reshape((40,40,2))
-        w = np.abs(gt_boxes[:, 2] - gt_boxes[:, 0])   #(1,6)
-        h = np.abs(gt_boxes[:, 3] - gt_boxes[:, 1])
-        w = np.tile(w, (1600, 1))                #(1600,6)
-        h = np.tile(h, (1600, 1))  
-        center_x = (gt_boxes[:, 0] + gt_boxes[:, 2]) / 2.0
-        center_y = (gt_boxes[:, 1] + gt_boxes[:, 3])/ 2.0  #(1,6)
-        center_x = np.tile(center_x, (1600, 1))
-        center_y = np.tile(center_y, (1600, 1))            #(1600,6)
+        w = np.tile(np.abs(gt_boxes[:, 2] - gt_boxes[:, 0]),(1600,1))   #(1,6)
+        h = np.tile(np.abs(gt_boxes[:, 3] - gt_boxes[:, 1]),(1600,1)) 
+        center_x = np.tile((gt_boxes[:, 0] + gt_boxes[:, 2])/ 2.0,(1600,1))
+        center_y = np.tile((gt_boxes[:, 1] + gt_boxes[:, 3])/ 2.0,(1600,1))  #(1,6)
         delta_x = np.abs(raw_xy[:, 1][:, np.newaxis] - center_x)    #(1600,6)
         delta_y = np.abs(raw_xy[:, 0][:, np.newaxis] - center_y)
 
         is_in_center = np.all([delta_x,delta_y]<=np.array([w/4,h/4]), axis=0)  #(1600,6)
         rectangles = is_in_center.astype(int)
     
-        dw2 = (rectangles*delta_x)**2
-        dh2 = (rectangles*delta_y)**2
-        distance = dw2 + dh2
+        #dw2 = (rectangles*delta_x)**2
+        #dh2 = (rectangles*delta_y)**2
+        distance = (rectangles*delta_y)**2 + (rectangles*delta_x)**2
 
         #set all non-zero numbers to zero except minimum in every row
         for i in range(distance.shape[0]):
@@ -273,8 +265,8 @@ class GraspDatasetBase(torch.utils.data.Dataset):
                 row[nonzero_idx[min_idx+1:]] = 0
     
         distance[np.where(distance != 0)] = 1    #distance here is the position of the selected points 标注了所有点选择的矩形
-        dw2_weight = dw2*distance
-        dh2_weight = dh2*distance
+        dw2_weight = ((rectangles*delta_x)**2)*distance
+        dh2_weight = ((rectangles*delta_y)**2)*distance
         mask = distance != 0  # 创建一个布尔型掩码，只计算非零数
         rx2 = ((w * distance) / 6) ** 2
         ry2 = ((h * distance) / 6) ** 2

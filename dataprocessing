@@ -297,22 +297,15 @@ class GraspDatasetBase(torch.utils.data.Dataset):
         return off_xy,w_xy,angles_one_hot
     
     def __getitem__(self, idx):
-        points_angles = self.load_from_cornell_file_angles(self.grasp_files[idx])
         center_all, left, top = self._get_crop_attrs(idx)
-        angles_original = self.angle(points_angles)
-        angles = self.angle(points_angles)
-        points = self.CHV(self.load_from_cornell_file(self.grasp_files[idx]),angles)
-        points = points.reshape((-1,2))
+        angles_original = self.angle(self.load_from_cornell_file_angles(self.grasp_files[idx]))
+        angles = self.angle(self.load_from_cornell_file_angles(self.grasp_files[idx]))
+        points = self.CHV(self.load_from_cornell_file(self.grasp_files[idx]),angles).reshape((-1,2))
         points += np.array((-top,-left)).reshape((1, 2))
-        points = points.reshape((-1,4))
-        middle_center = self.center_allrectangles(points)
-        points = self.zoom(points,factor=1.0,center=middle_center)
+        points = self.zoom(points,factor=1.0,center=self.center_allrectangles(points))
         y = self.target(points,angles_original)
-        rgb_img = self.get_rgb(idx)
-        depth_img = self.get_depth(idx)
-        rgb_img = rgb_img[:2,:,:]
         
-        RGD_img = np.concatenate((rgb_img,np.expand_dims(depth_img, 0)),axis=0)
+        RGD_img = np.concatenate((self.get_rgb(idx)[:2,:,:],np.expand_dims(self.get_depth(idx), 0)),axis=0)
 
         return RGD_img,y
     def __len__(self):

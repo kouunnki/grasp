@@ -1,0 +1,111 @@
+# TensorFlow and tf.keras
+import tensorflow as tf
+import tensorflow_datasets as tfds
+
+# Helper libraries
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+
+from qkeras import *
+from qkeras.utils import model_quantize
+from keras.optimizers import Adam
+
+import cv2
+from keras.layers import *
+from keras.models import Model
+from keras import losses
+from keras.layers import BatchNormalization
+
+
+#labels_path = '/ldisk/dataset/imagenet2012/5.0.0/label.labels.txt'
+#imagenet_labels = np.array(open(labels_path).read().splitlines())
+
+#imagenet_dataset_builder = tfds.builder('imagenet2012', data_dir='/ldisk/dataset')
+#imagenet_train = imagenet_dataset_builder.as_dataset(split=tfds.Split.VALIDATION,as_supervised=True,batch_size=1)
+#def resize_with_crop(image, label):
+#    i = image
+#    i = tf.image.resize(i, (224,224))
+#    i = tf.keras.applications.resnet.preprocess_input(i)
+#    return (i, label)
+
+#imagenet_train = imagenet_train.map(resize_with_crop)
+
+
+def make_model():
+    # Load the network
+    x = Input(shape=(320,320,3,))
+    logging.info('Loading Network...')
+    config = {
+    "QConv2D": {
+        "kernel_quantizer": "quantized_bits(8,8,1)",
+        "bias_quantizer": "quantized_po2(8)"
+    },
+    "QActivation": { "ulaw": "quantized_ulaw(8,8)" },
+    }
+    input_shape = (320, 320, 3)
+    pretrained_model = tf.keras.applications.resnet.ResNet50(include_top=False,weights="imagenet",input_shape=input_shape)
+    pretrained_model.trainable = False
+    #qmodel = model_quantize(pretrained_model,config,8,transfer_weights=True)
+    x1 = pretrained_model.get_layer('conv3_block4_out').output
+    x2 = pretrained_model.get_layer('conv4_block5_out').output
+    x3 = pretrained_model.get_layer('conv5_block3_out').output
+    feat_extractor_model = tf.keras.Model(inputs=pretrained_model.input, outputs=[x1, x2, x3])
+    f1,f2,f3 = feat_extractor_model(x)
+
+
+    x_conv3 = f1 
+    x_conv4 = f2 
+    x_conv5 = f3 
+
+    y1 = tf.keras.layers.Conv2D(128,1,1,padding="valid")(x_conv3)
+    y1 = BatchNormalization(trainable=True)(y1)
+    y1 = tf.keras.layers.Activation("relu")(y1)
+
+    y2 = tf.keras.layers.Conv2D(128,1,1,padding="valid")(x_conv4)
+    y2 = BatchNormalization(trainable=True)(y2)
+    y2 = tf.keras.layers.Activation("relu")(y2)
+
+    y3 = tf.keras.layers.Conv2D(128,1,1,padding="valid")(x_conv5)
+    y3 = BatchNormalization(trainable=True)(y3)
+    y3 = Activation("relu")(y3)
+
+    #FUM module
+    y = tf.keras.layers.Conv2DTranspose(128,3,strides=2,padding="same")(y3)
+    y = tf.keras.layers.Activation("relu")(y)
+    y = keras.layers.add([y,y2])
+    y = tf.keras.layers.Conv2DTranspose(128,3,strides=2,padding="same")(y)
+    y = tf.keras.layers.Activation("relu")(y)
+    y = keras.layers.add([y,y1])
+    #CHV Rectangles Regression
+    y_CHV = Conv2D(128,3,1,padding="same")(y)
+    y_CHV = BatchNormalization(trainable=True)(y_CHV)
+    y_CHV = Activation("relu")(y_CHV)
+    y_CHV = Conv2D(128,3,1,padding="same")(y_CHV)
+    y_CHV = BatchNormalization(trainable=True)(y_CHV)
+    y_CHV = Activation("relu")(y_CHV)
+    y_CHV = Conv2D(4,3,1,padding="same")(y_CHV)
+    y_CHV = BatchNormalization(trainable=True)(y_CHV)
+    y_CHV = Activation("relu")(y_CHV)
+     #grasp angle classification
+    y_angle = Conv2D(128,3,1,padding="same")(y)
+    y_angle = BatchNormalization(trainable=True)(y_angle)
+    y_angle = Activation("relu")(y_angle)
+    y_angle = Conv2D(128,3,1,padding="same")(y_angle)
+    y_angle = BatchNormalization(trainable=True)(y_angle)
+    y_angle = Activation("relu")(y_angle)
+    y_angle = Conv2D(18,3,1,padding="same")(y_angle)
+    y_angle = Activation("sigmoid", name="sigmoid")(y_angle)
+
+
+
+    return Model(inputs=[x],outputs=[y_angle,y_CHV])
+
+
+
+#decode_predictions = tf.keras.applications.resnet.decode_predictions
+
+# Print Accuracy
+#result = qmodel.evaluate(imagenet_train)
+#print("Test loss:", result[0])
+#print("Test accuracy:", result[1])

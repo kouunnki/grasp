@@ -11,14 +11,14 @@ def loss_function(box1, box2, w_xy, angles_true, angles_pre):
             for j in range(40):
                 if not np.all(box1[s,i,j,:]==0):
                     Npos += 1
-                    left1 = box1[s,i,j,0] - 4+i*8  #left
+                    left1 = box1[s,i,j,0] + 4+i*8  #left
                     top1 = box1[s,i,j,1] + 4+i*8  #top
                     right1 = box1[s,i,j,2] + 4+i*8  #right
-                    down1 = box1[s,i,j,3] - 4+i*8  #down
-                    left2 = box2[s,i,j,0] - 4+i*8  #left
+                    down1 = box1[s,i,j,3] + 4+i*8  #down
+                    left2 = box2[s,i,j,0] + 4+i*8  #left
                     top2 = box2[s,i,j,1] + 4+i*8  #top
                     right2 = box2[s,i,j,2] + 4+i*8  #right
-                    down2 = box2[s,i,j,3] - 4+i*8  #down
+                    down2 = box2[s,i,j,3] + 4+i*8  #down
                     in_h = min(down1, down2) - max(top1, top2)
                     in_w = min(right1, right2) - max(left1, left2)
         

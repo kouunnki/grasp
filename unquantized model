@@ -1,6 +1,6 @@
 # TensorFlow and tf.keras
 import tensorflow as tf
-import tensorflow_datasets as tfds
+
 
 # Helper libraries
 import os
@@ -72,9 +72,11 @@ def make_model():
 
     #FUM module
     y = tf.keras.layers.Conv2DTranspose(128,3,strides=2,padding="same")(y3)
+    y = BatchNormalization(trainable=True)(y)
     y = tf.keras.layers.Activation("relu")(y)
     y = keras.layers.add([y,y2])
     y = tf.keras.layers.Conv2DTranspose(128,3,strides=2,padding="same")(y)
+    y = BatchNormalization(trainable=True)(y)
     y = tf.keras.layers.Activation("relu")(y)
     y = keras.layers.add([y,y1])
     #CHV Rectangles Regression

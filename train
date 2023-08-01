@@ -17,6 +17,8 @@ import torch.utils.data
 
 import tensorboardX
 from torch.utils.tensorboard import SummaryWriter
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 
 
 from dataprocessing import GraspDatasetBase
@@ -49,7 +51,7 @@ def parse_args():
     parser.add_argument('--num-workers', type=int, default=8, help='Dataset workers')
 
     parser.add_argument('--batch-size', type=int, default=8, help='Batch size')
-    parser.add_argument('--epochs', type=int, default=50, help='Training epochs')
+    parser.add_argument('--epochs', type=int, default=100, help='Training epochs')
     parser.add_argument('--batches-per-epoch', type=int, default=70, help='Batches per Epoch')
     parser.add_argument('--val-batches', type=int, default=250, help='Validation Batches')
 
@@ -91,16 +93,22 @@ def train(epoch, train_data, batches_per_epoch, model):
                 break
             #x= tf.data.Dataset.from_tensor_slices(x)
             x = x.permute(0,2,3,1).data.numpy()
-
+            
             y_off, y_w, y_angles = y
+            
             y_angles = np.delete(y_angles,0,axis=3)
+            
+            # 遍历每张图片
 
             
 
             with tf.GradientTape() as tape:
                 y_pred = model(x)
                 
-                lossd = loss_function(y_off, y_pred[1],y_w,y_angles,y_pred[0])
+                
+                #plt.imshow(y_pred, cmap='hot',interpolation='nearest')
+                #plt.savefig('./myplot.png')
+                lossd,L_cls,L_reg = loss_function(y_off, y_pred[1],y_w,y_angles,y_pred[0])
 
                 
             grads = tape.gradient(lossd, model.trainable_weights)
@@ -116,7 +124,7 @@ def train(epoch, train_data, batches_per_epoch, model):
             #results['loss'] = model.train_on_batch(x,y)
 
             if batch_idx % 10 == 0:
-               logging.info('Epoch: {}, Batch: {}, Loss: {:0.4f}'.format(epoch, batch_idx, lossd))
+               logging.info('Epoch: {}, Batch: {}, Loss: {:0.4f},Loss_cls: {:0.4f},Loss_reg: {:0.4f}'.format(epoch, batch_idx, lossd,L_cls,L_reg))
             
 
             
@@ -126,18 +134,46 @@ def train(epoch, train_data, batches_per_epoch, model):
             #        results['losses'][ln] = 0
             #    results['losses'][ln] += l
 
+            if epoch == 50 and batch_idx == 60:
+                for i, array in enumerate(y_off):
+                # 创建一个空白图像
+                    image = np.zeros((320, 320))
+                    fig, ax = plt.subplots()
+                    ax.imshow(image)
+                    
 
-            # Display the images
-            #if vis:
-             #   imgs = []
-              #  n_img = min(4, x.shape[0])
-               # for idx in range(n_img):
-                #    imgs.extend([x[idx,].numpy().squeeze()] + [yi[idx,].numpy().squeeze() for yi in y] + [
-                 #       x[idx,].numpy().squeeze()] + [pc[idx,].detach().cpu().numpy().squeeze() for pc in lossd['pred'].values()])
-                #gridshow('Display', imgs,
-                 #        [(x.min().item(), x.max().item()), (0.0, 1.0), (0.0, 1.0), (-1.0, 1.0), (0.0, 1.0)] * 2 * n_img,
-                  #       [cv2.COLORMAP_BONE] * 10 * n_img, 10)
-                #cv2.waitKey(2)
+                # 遍历数组
+                    for j in range(array.shape[0]):
+                            for k in range(array.shape[1]):
+
+                                if array[j, k].any():  # 如果该像素点对应的矩形存在
+                                    
+                                    
+                                    x = j*8 - array[j, k, 0]  # 矩形左下角x坐标
+                                    y = k*8 + array[j, k, 3]  # 矩形左下角y坐标
+                                    
+                                    x1 = j*8 - y_pred[1][i,j, k, 0]
+                                    y1 = k*8 + y_pred[1][i,j, k, 3]
+                                    width = array[j, k, 0] + array[j, k, 2]  # 矩形宽度
+                                    
+                                    height = array[j, k, 1] + array[j, k, 3]  # 矩形高度
+                                    width1 = y_pred[1][i,j, k, 0] + y_pred[1][i,j, k, 2]
+                                    height1 = y_pred[1][i,j, k, 1] + y_pred[1][i,j, k, 3]
+                                    
+
+                    # 创建矩形框并添加到当前图像中
+                                    rect = Rectangle((x, y), width, height, linewidth=1, edgecolor='r', facecolor='none')
+                                    rect1 = Rectangle((x1, y1), width1, height1, linewidth=1, edgecolor='g', facecolor='none')
+                                    
+                                    ax.add_patch(rect)
+                                    ax.add_patch(rect1)
+
+                
+                    ax.set_title(f"Image {i+1}")
+                    ax.axis('off')
+                    fig.savefig(f"heatmap_{i+1}.png")
+                    plt.close(fig)
+                    #cv2.waitKey(2)
 
     results['loss'] /= batch_idx
     for l in results['losses']:
@@ -159,6 +195,10 @@ def validate( val_data, batches_per_epoch,model):
     results = {
         'correct': 0,
         'failed': 0,
+        'correct_iou':0,
+        'failed_iou':0,
+        'correct_angle':0,
+        'failed_angle':0,
         'loss': 0,
         'losses': {
 
@@ -180,19 +220,24 @@ def validate( val_data, batches_per_epoch,model):
                 y_angles = np.delete(y_angles,0,axis=3)
 
                 y_pred = model(x)
-                lossd = loss_function(y_off,y_pred[1],y_w,y_angles,y_pred[0])
+                lossd,L_cls,L_reg = loss_function(y_off,y_pred[1],y_w,y_angles,y_pred[0])
                 results['loss'] += lossd/ld
                 #for ln, l in lossd['losses']:
                 #    if ln not in results['losses']:
                 #        results['losses'][ln] = 0
                 #    results['losses'][ln] += l/ld
-                correct,failed = evaluate_grasp(y_off,y_pred[1],y_angles,y_pred[0])
+                correct,failed,correct_angle,correct_iou,failed_angle,failed_iou = evaluate_grasp(y_off,y_pred[1],y_angles,y_pred[0])
 
 
                 results['correct'] = correct
 
                 results['failed'] = failed
+                results['correct_angle'] = correct_angle
 
+                results['failed_angle'] = failed_angle
+                results['correct_iou'] = correct_iou
+
+                results['failed_iou'] = failed_iou
     return results
 
 
@@ -231,8 +276,8 @@ def run():
     )
 
     logging.info('Done')
-    optimizer = Adam(0.001)
-    model = make_model()
+    optimizer = Adam(0.0001)
+    model = make_model(trainable=False)
     model.compile(optimizer=optimizer, 
                          loss=loss_function)
     model.summary()
@@ -243,12 +288,17 @@ def run():
     for epoch in range(args.epochs):
         logging.info('Beginning Epoch {:02d}'.format(epoch))
         #print(args.batches_per_epoch)
+        if epoch == 50:
+            model.trainable=True
+            optimizer = Adam(0.00001)
+            model.compile(optimizer=optimizer, loss=loss_function)
+            model.summary()
         train_results = train(epoch,train_data, args.batches_per_epoch, model)
 
         # Log training losses to tensorboard
-        #tb.add_scalar('loss/train_loss', train_results['loss'].numpy(), epoch)
-        #for n, l in train_results['losses'].items():
-        #    tb.add_scalar('train_loss/' + n, l, epoch)
+        tb.add_scalar('loss/train_loss', train_results['loss'].numpy(), epoch)
+        for n, l in train_results['losses'].items():
+            tb.add_scalar('train_loss/' + n, l, epoch)
 
         # Run Validation
         logging.info('Validating...')
@@ -266,9 +316,13 @@ def run():
 
         # Save best performing network
         iou = test_results['correct'] / (test_results['correct'] + test_results['failed'])
+        accuracy_iou = test_results['correct_iou'] / (test_results['correct_iou'] + test_results['failed_iou'])
+        accuracy_angles = test_results['correct_angle'] / (test_results['correct_angle'] + test_results['failed_angle'])
         print(iou)
+        print(accuracy_angles)
+        print(accuracy_iou)
         if iou > best_iou or epoch == 0 or (epoch % 10) == 0:
-            model.save(os.path.join(save_folder, 'epoch_%02d_iou_%0.2f' % (epoch, iou)))
+            #model.save(os.path.join(save_folder, 'epoch_%02d_iou_%0.2f' % (epoch, iou)))
 
             best_iou = iou
             print(best_iou)

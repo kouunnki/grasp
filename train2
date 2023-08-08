@@ -110,7 +110,8 @@ def train(epoch, train_data, batches_per_epoch, model,angle_head,CHV_head):
                 #plt.savefig('./myplot.png')
                 lossd,L_cls,L_reg = loss_function(y_off, y_pred[1],y_w,y_angles,y_pred[0])
 
-                
+            optimizer_angle = Adam(0.001)
+            optimizer_CHV = Adam(0.0001)   
             grads_cls = tape.gradient(L_cls, angle_head.trainable_weights)
             #grads_norm = tf.linalg.global_norm(grads)
 
@@ -119,7 +120,7 @@ def train(epoch, train_data, batches_per_epoch, model,angle_head,CHV_head):
 
             # 进行梯度裁剪
             clipped_grads_cls, _ = tf.clip_by_global_norm(grads_cls, clip_norm)
-            angle_head.optimizer_angle.apply_gradients(zip(clipped_grads_cls, angle_head.trainable_weights))
+            optimizer_angle.apply_gradients(zip(clipped_grads_cls, angle_head.trainable_weights))
             
             grads_reg = tape.gradient(L_reg, CHV_head.trainable_weights)
             #grads_norm = tf.linalg.global_norm(grads)
@@ -129,7 +130,7 @@ def train(epoch, train_data, batches_per_epoch, model,angle_head,CHV_head):
 
             # 进行梯度裁剪
             clipped_grads_reg, _ = tf.clip_by_global_norm(grads_reg, clip_norm)
-            CHV_head.optimizer_angle.apply_gradients(zip(clipped_grads_reg, CHV_head.trainable_weights))
+            optimizer_angle.apply_gradients(zip(clipped_grads_reg, CHV_head.trainable_weights))
 
             #results['loss'] = model.train_on_batch(x,y)
 

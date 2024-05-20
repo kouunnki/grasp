@@ -17,7 +17,7 @@ from keras.models import Model
 from keras import losses
 from keras.layers import BatchNormalization
 import keras_cv
-
+from tensorflow.keras.initializers import he_normal
 
 #labels_path = '/ldisk/dataset/imagenet2012/5.0.0/label.labels.txt'
 #imagenet_labels = np.array(open(labels_path).read().splitlines())
@@ -31,30 +31,7 @@ import keras_cv
 #    return (i, label)
 
 #imagenet_train = imagenet_train.map(resize_with_crop)
-def classification_head(inputs):
-    # ... (定义分类头的网络结构)
-    y_angle = Conv2D(128,3,1,padding="same")(inputs)
-    y_angle = BatchNormalization(trainable=True)(y_angle)
-    y_angle = Activation("relu")(y_angle)
-    y_angle = Conv2D(128,3,1,padding="same")(y_angle)
-    y_angle = BatchNormalization(trainable=True)(y_angle)
-    y_angle = Activation("relu")(y_angle)
-    y_angle = Conv2D(18,3,1,padding="same")(y_angle)
-    y_angle = Activation("sigmoid", name="sigmoid")(y_angle)
-    return y_angle
 
-def regression_head(inputs):
-    # ... (定义回归头的网络结构)
-    y_CHV = Conv2D(128,3,1,padding="same")(inputs)
-    y_CHV = BatchNormalization(trainable=True)(y_CHV)
-    y_CHV = Activation("relu")(y_CHV)
-    y_CHV = Conv2D(128,3,1,padding="same")(y_CHV)
-    y_CHV = BatchNormalization(trainable=True)(y_CHV)
-    y_CHV = Activation("relu")(y_CHV)
-    y_CHV = Conv2D(4,3,1,padding="same")(y_CHV)
-    y_CHV = BatchNormalization(trainable=True)(y_CHV)
-    y_CHV = Activation("relu")(y_CHV)
-    return y_CHV
 
 def make_model(trainable):
     # Load the network
@@ -62,64 +39,104 @@ def make_model(trainable):
     logging.info('Loading Network...')
     config = {
     "QConv2D": {
-        "kernel_quantizer": "quantized_bits(8,8,1)",
-        "bias_quantizer": "quantized_po2(8)"
+        "kernel_quantizer": "quantized_bits(2,2,1)",
+        "bias_quantizer": "quantized_bits(2,2,1)"
     },
-    "QActivation": { "ulaw": "quantized_ulaw(8,8)" },
+    "QActivation": { "relu": "quantized_relu(8,8)" },
     }
     input_shape = (320, 320, 3)
     pretrained_model = tf.keras.applications.resnet.ResNet50(include_top=False,weights="imagenet",input_shape=input_shape)
     #pretrained_model = keras_cv.models.ResNet18V2Backbone(input_shape=input_shape)
-    pretrained_model.trainable = trainable
-    #qmodel = model_quantize(pretrained_model,config,8,transfer_weights=True)
-    x1 = pretrained_model.get_layer('conv3_block4_out').output
-    x2 = pretrained_model.get_layer('conv4_block5_out').output
-    x3 = pretrained_model.get_layer('conv5_block3_out').output
-    #x1 = pretrained_model.get_layer('v2_stack_1_block2_out').output
-    #x2 = pretrained_model.get_layer('v2_stack_2_block2_out').output
-    #x3 = pretrained_model.get_layer('v2_stack_3_block2_out').output
-    feat_extractor_model = tf.keras.Model(inputs=pretrained_model.input, outputs=[x1, x2, x3])
+    #pretrained_model.trainable = trainable
+    qmodel = model_quantize(pretrained_model,config,8,transfer_weights=True)
+    x1 = qmodel.get_layer('conv3_block4_out').output
+    x2 = qmodel.get_layer('conv4_block5_out').output
+    x3 = qmodel.get_layer('conv5_block3_out').output
+    #x1 = qmodel.get_layer('v2_stack_1_block2_out').output
+    #x2 = qmodel.get_layer('v2_stack_2_block2_out').output
+    #x3 = qmodel.get_layer('v2_stack_3_block2_out').output
+    feat_extractor_model = tf.keras.Model(inputs=qmodel.input, outputs=[x1, x2, x3])
+    
     f1,f2,f3 = feat_extractor_model(x)
 
 
     x_conv3 = f1 
     x_conv4 = f2 
     x_conv5 = f3 
-
-    y1 = tf.keras.layers.Conv2D(128,1,1,padding="valid")(x_conv3)
+    
+    
+    y1 = Conv2D(128,1,1,padding="valid",kernel_regularizer=tf.keras.regularizers.l1_l2(l1=0.1,l2=0.1))(x_conv3)
     y1 = BatchNormalization(trainable=True)(y1)
-    y1 = tf.keras.layers.Activation("relu")(y1)
-
-    y2 = tf.keras.layers.Conv2D(128,1,1,padding="valid")(x_conv4)
+    y1 = Activation("relu")(y1)
+    y1 = Dropout(0.3)(y1)
+    head_model = tf.keras.Model(inputs=x_conv3,outputs=y1)
+    y2 = Conv2D(128,1,1,padding="valid",kernel_regularizer=tf.keras.regularizers.l1_l2(l1=0.1,l2=0.1))(x_conv4)
     y2 = BatchNormalization(trainable=True)(y2)
-    y2 = tf.keras.layers.Activation("relu")(y2)
+    y2 = Activation("relu")(y2)
+    y2 = Dropout(0.3)(y2)
 
-    y3 = tf.keras.layers.Conv2D(128,1,1,padding="valid")(x_conv5)
+    y3 = Conv2D(128,1,1,padding="valid",kernel_regularizer=tf.keras.regularizers.l1_l2(l1=0.1,l2=0.1))(x_conv5)
     y3 = BatchNormalization(trainable=True)(y3)
     y3 = Activation("relu")(y3)
+    y3 = Dropout(0.3)(y3)
 
     #FUM module
-    y = tf.keras.layers.Conv2DTranspose(128,3,strides=2,padding="same")(y3)
+    y = Conv2DTranspose(128,3,strides=2,padding="same",kernel_regularizer=tf.keras.regularizers.l1_l2(l1=0.1,l2=0.1))(y3)
     y = BatchNormalization(trainable=True)(y)
-    y = tf.keras.layers.Activation("relu")(y)
+    y = Activation("relu")(y)
     y = keras.layers.add([y,y2])
-    y = tf.keras.layers.Conv2DTranspose(128,3,strides=2,padding="same")(y)
+    y = Dropout(0.3)(y)
+    y = Conv2DTranspose(128,3,strides=2,padding="same",kernel_regularizer=tf.keras.regularizers.l1_l2(l1=0.1,l2=0.1))(y)
     y = BatchNormalization(trainable=True)(y)
-    y = tf.keras.layers.Activation("relu")(y)
+    y = Activation("relu")(y)
     y = keras.layers.add([y,y1])
+    y = Dropout(0.3)(y)
     #CHV Rectangles Regression
-    classification_output = classification_head(y)
-    regression_output = regression_head(y)
-    model = Model(inputs=[x],outputs=[classification_output,regression_output])
-    cls_head=Model(inputs=[y],outputs=[classification_output])
-    reg_head=Model(inputs=[y],outputs=[regression_output])
+    y_CHV = Conv2D(128,3,1,padding="same",kernel_regularizer=tf.keras.regularizers.l1_l2(l1=0.3,l2=0.3))(y)
+    y_CHV = BatchNormalization(trainable=True)(y_CHV)
+    y_CHV = Activation("relu")(y_CHV)
+    y_CHV = Dropout(0.8)(y_CHV)
+    y_CHV = Conv2D(128,3,1,padding="same",kernel_regularizer=tf.keras.regularizers.l1_l2(l1=0.3,l2=0.3))(y_CHV)
+    y_CHV = BatchNormalization(trainable=True)(y_CHV)
+    y_CHV = Activation("relu")(y_CHV)
+    y_CHV = Dropout(0.8)(y_CHV)
+    y_CHV = Conv2D(4,3,1,padding="same",kernel_regularizer=tf.keras.regularizers.l1_l2(l1=0.3,l2=0.3))(y_CHV)
+    y_CHV = BatchNormalization(trainable=True)(y_CHV)
+    y_CHV = Activation("relu")(y_CHV)
+     #grasp angle classification
+    y_angle = Conv2D(128,3,1,padding="same",kernel_regularizer=tf.keras.regularizers.l1_l2(l1=0.1,l2=0.1))(y)
+    y_angle = BatchNormalization(trainable=True)(y_angle)
+    y_angle = Activation("relu")(y_angle)
+    y_angle = Dropout(0.3)(y_angle)
+    y_angle = Conv2D(128,3,1,padding="same",kernel_regularizer=tf.keras.regularizers.l1_l2(l1=0.1,l2=0.1))(y_angle)
+    y_angle = BatchNormalization(trainable=True)(y_angle)
+    y_angle = Activation("relu")(y_angle)
+    y_angle = Dropout(0.3)(y_angle)
+    y_angle = Conv2D(18,3,1,padding="same",kernel_regularizer=tf.keras.regularizers.l1_l2(l1=0.1,l2=0.1))(y_angle)
+    y_angle = Activation("sigmoid")(y_angle)
+     #weight regression
+    y_w = Conv2D(128,3,1,padding="same",kernel_regularizer=tf.keras.regularizers.l1_l2(l1=0.1,l2=0.1))(y)
+    y_w = BatchNormalization(trainable=True)(y_w)
+    y_w = Activation("relu")(y_w)
+    y_w = Dropout(0.3)(y_w)
+    y_w = Conv2D(128,3,1,padding="same",kernel_regularizer=tf.keras.regularizers.l1_l2(l1=0.1,l2=0.1))(y_w)
+    y_w = BatchNormalization(trainable=True)(y_w)
+    y_w = Activation("relu")(y_w)
+    y_w = Dropout(0.3)(y_w)
+    y_w = Conv2D(1,3,1,padding="same",kernel_regularizer=tf.keras.regularizers.l1_l2(l1=0.1,l2=0.1))(y_w)
+    y_w = Activation("relu")(y_w)
+    
+    #y_label = Conv2D(128,3,1,padding="same",kernel_regularizer=tf.keras.regularizers.l1_l2(l1=0.3,l2=0.3))(y)
+    #y_label = BatchNormalization(trainable=True)(y_label)
+    #y_label = Activation("relu")(y_label)
+    #y_label = Dropout(0.6)(y_label)
+    #y_label = Conv2D(128,3,1,padding="same",kernel_regularizer=tf.keras.regularizers.l1_l2(l1=0.3,l2=0.3))(y_label)
+    #y_label = BatchNormalization(trainable=True)(y_label)
+    #y_label = Activation("relu")(y_label)
+    #y_label = Dropout(0.6)(y_label)
+    #y_label = Conv2D(1,3,1,padding="same")(y_label)
+    #y_label = Activation("sigmoid", name = "sigmoid_1")(y_label)
+
 
     
-    return model,cls_head,reg_head
-
-#decode_predictions = tf.keras.applications.resnet.decode_predictions
-
-# Print Accuracy
-#result = qmodel.evaluate(imagenet_train)
-#print("Test loss:", result[0])
-#print("Test accuracy:", result[1])
+    return head_model

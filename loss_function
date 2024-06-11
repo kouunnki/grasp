@@ -1,1 +1,92 @@
+import numpy as np
+from dataprocessing import *
+import tensorflow as tf
+
+def loss_function(box1, box2, w_xy, angles_true, angles_pre,w_pre):
+    # Flatten the boxes to 2D arrays
+    i, j = np.indices((40, 40))
+    offset = i * 8+4
+    #caculate the true coordinate of the rectangle
+    left1, top1, right1, down1 = box1[..., 0], box1[..., 1], box1[..., 2], box1[..., 3]
+    left2, top2, right2, down2 = box2[..., 0], box2[..., 1], box2[..., 2], box2[..., 3]
+    
+    left1 = -left1  + offset
+    top1 = -top1 + offset
+    right1 = right1  + offset
+    down1 = down1  + offset
+
+    left2 = -left2  + offset
+    top2 = -top2  + offset
+    right2 = right2  + offset
+    down2 = down2  + offset
+
+    box1_flat = tf.stack([left1, top1, right1, down1], axis=-1)
+    box2_flat = tf.stack([left2, top2, right2, down2], axis=-1)
+    box1_true = tf.reshape(box1,[-1,4])
+    box1_flat = tf.reshape(box1_flat, [-1, 4])
+    box2_flat = tf.reshape(box2_flat, [-1, 4])
+    mask = tf.reduce_any(tf.not_equal(box1_true, 0), axis=-1)
+    indices = tf.where(mask)
+    box1_flat = tf.gather_nd(box1_flat, indices)
+    box2_flat = tf.gather_nd(box2_flat, indices)
+    box1_flat = tf.cast(box1_flat, tf.float32)
+    box2_flat = tf.cast(box2_flat, tf.float32)
+    w_xy_flat = tf.reshape(w_xy, [-1])
+    w_xy_flat = tf.gather_nd(w_xy_flat,indices)
+    w_xy_flat = tf.cast(w_xy_flat, tf.float32)
+    
+    # Compute the intersection and union
+    h = tf.maximum(0.0, tf.minimum(box1_flat[:,3],box2_flat[:,3]) - tf.maximum(box1_flat[:,1],box2_flat[:,1]))
+    w = tf.maximum(0.0, tf.minimum(box1_flat[:,2],box2_flat[:,2]) - tf.maximum(box1_flat[:,0],box2_flat[:,0]))
+    intersection = h * w
+    
+    area1 = (box1_flat[:, 2] - box1_flat[:, 0]) * (box1_flat[:, 3] - box1_flat[:, 1])
+    area2 = (box2_flat[:, 2] - box2_flat[:, 0]) * (box2_flat[:, 3] - box2_flat[:, 1])
+    union = area1 + area2 - intersection
+    
+    #iou = tf.where(tf.equal(union, 0.0), tf.zeros_like(union), intersection / union)
+    #iou = tf.where(tf.abs(union) < 1e-5, tf.zeros_like(union), intersection / union)
+    iou = intersection / union
+    # Compute the L_reg term
+    x1, y1, x2, y2 = tf.unstack(box1_flat, axis=1)
+    x3, y3, x4, y4 = tf.unstack(box2_flat, axis=1)
+    C = tf.sqrt(tf.square(tf.maximum(tf.maximum(tf.maximum(x1, x2), x3), x4) - tf.minimum(tf.minimum(tf.minimum(x1, x2), x3), x4)) + \
+                tf.square(tf.maximum(tf.maximum(tf.maximum(y1, y2), y3), y4) - tf.minimum(tf.minimum(tf.minimum(y1, y2), y3), y4)))
+    
+    point_1 = tf.stack([(x1+x2)/2, (y1+y2)/2], axis=1)
+    point_2 = tf.stack([(x3+x4)/2, (y3+y4)/2], axis=1)
+    D = tf.sqrt(tf.square(point_2[:, 0]-point_1[:, 0]) + tf.square(point_2[:, 1]-point_1[:, 1]))
+    lens = tf.square(D) / tf.square(C)
+    diou = iou - lens
+    L_reg = (1 - diou) * w_xy_flat,
+    L_reg_sum = tf.reduce_sum(L_reg)
+    
+    Npos = np.count_nonzero(box1_flat,axis=0)[0]
+    #Compute the Lcls term
+    mask = tf.equal(angles_true, 1)
+    Lcls_masked = tf.zeros_like(angles_pre)
+    
+    Lcls_masked = tf.where(mask, 0.25*((1-angles_pre)**2)*tf.math.log(angles_pre+1e-9), Lcls_masked)
+    
+    Lcls_masked = tf.where(~mask, 0.75*((angles_pre)**2)*tf.math.log(1-angles_pre+1e-9), Lcls_masked)
+    
+    Lcls = -tf.reduce_sum(Lcls_masked)/Npos
+    Lcls = tf.cast(Lcls, tf.float32)
+    L_reg = (2/Npos)*L_reg_sum
+    
+    weights = np.where(w_xy !=0,1,0)
+    
+    w_pre = tf.squeeze(w_pre,axis=-1)
+    squared_errors = (w_xy - w_pre) **2
+
+    weighted_squared_errors = weights * squared_errors
+
+    L_w = np.mean(weighted_squared_errors)    
+    #label_pre = tf.cast(label_pre,tf.float32)
+    #label_true = tf.cast(label_true,tf.float32)
+    #label_pre = np.clip(label_pre,1e-7, 1 - 1e-7)
+    #L_label = -tf.reduce_mean(250*label_true * tf.math.log(label_pre) + 0.5*(1 - label_true) * tf.math.log(1 - label_pre))
+
+    L = Lcls + L_reg+L_w
+    return L,Lcls,L_reg,L_w
 
